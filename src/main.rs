@@ -1,25 +1,21 @@
 extern crate time;
 extern crate crypto;
-extern crate hex;
-extern crate json;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
 extern crate canteen;
 extern crate urlparse;
+extern crate requests;
 
 use urlparse::urlparse;
 use canteen::*;
 use canteen::utils;
 use self::crypto::digest::Digest;
 use self::crypto::sha3::Sha3;
-use ::hex::{FromHex, ToHex};
-
 use ::time::*;
 use std::rc::Rc;
-use rustc_serialize::hex::FromHex;
-use std::thread::current;
+use requests::*;
 
 
 struct Transaction {
@@ -32,14 +28,14 @@ struct Block {
     index: i8,
     timestamp: i64,
     transaction: Transaction,
-    proof: i16,
+    proof: i32,
     previous_hash: String,
 }
 
 struct Blockchain {
     current_transactions: Vec<Transaction>,
     chain: Vec<Block>,
-    nodes: String,
+    nodes: Vec<String>,
 }
 
 impl Block {
@@ -70,7 +66,7 @@ impl Blockchain {
         Blockchain {
             current_transactions: Vec::new(),
             chain: Vec::new(),
-            nodes: String::new(),
+            nodes: Vec::new(),
         }
     }
 
@@ -84,11 +80,11 @@ impl Blockchain {
         ：参数address:node的address. Eg. 'http://127.0.0.1:5000'
         */
         parsed_url = urlparse(address);
-        self.nodes.push_str(parsed_url.netloc);
+        self.nodes.push(parsed_url);
     }
 
     fn valid_chain(chain: Vec<Block>) -> bool {
-        let last_block = &chain[0];
+        let mut last_block = &chain[0];
         let mut current_idx = 1;
 
         while current_idx < chain.len() {
@@ -96,12 +92,36 @@ impl Blockchain {
             println!("{:?}", last_block);
             println!("{:?}", block);
             println!("\n----------------\n");
-            if block.previous_hash != block.myhash(last_block) {}
+            if block.previous_hash != block.myhash(last_block) {
+                return false;
+            }
+
+            if !valid_proof(last_block.proof, block.proof) {
+                return false;
+            }
+
+            last_block = block;
+            current_idx += 1;
         };
-        return true
+        true
     }
 
-    fn new_block(&mut self, proof: i16,
+    fn resolve_conflicts(&self) -> bool {
+        let neighbours = &self.nodes;
+        let new_chain = vec![];
+        let max_length = self.chain.len();
+
+        for node in neighbours {
+            let response = requests::get("http://" + String::from(node) + "/chain");
+            match response {
+                Ok(re) =>,
+                Err(E) => panic!("error"),
+            }
+        }
+        false
+    }
+
+    fn new_block(&mut self, proof: i32,
                  previous_hash: Option<String>) -> Block {
         self.current_transactions.clear();
         let new_block = Block {
@@ -123,6 +143,16 @@ impl Blockchain {
     fn timestamp() -> i64 {
         let timespec = time::get_time();
         timespec.sec * 1000 + (timespec.nsec as f64 / 1000.0 / 1000.0) as i64
+    }
+
+    fn valid_proof(last_proof: i32, proof: i32) -> bool {
+        // create a SHA3-256 object
+        let mut hasher = Sha3::sha3_256();
+        // write input message
+        hasher.input_str(&(String::from(last_proof) + String::from(proof)));
+
+        let guess_hash = hasher.result_str();
+        return guess_hash[0..4] == "0000";
     }
 }
 
