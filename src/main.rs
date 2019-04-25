@@ -7,9 +7,13 @@ extern crate uuid;
 extern crate canteen;
 extern crate serde;
 extern crate serde_json;
+extern crate argparse;
+
 
 #[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate lazy_static;
 
 use canteen::{Canteen, Request, Response, Method};
 use canteen::utils;
@@ -22,15 +26,19 @@ use std::rc::Rc;
 use requests::*;
 use rustc_serialize::json;
 use uuid::Uuid;
+use canteen::utils::make_response;
+use serde_json::json;
+use serde::de::Deserializer;
+use argparse::ArgumentParser;
 
-#[derive(RustcDecodable, RustcEncodable, Debug, Clone)]
+#[derive(RustcDecodable, RustcEncodable, Debug, Clone, Serialize, Deserialize)]
 struct Transaction {
     sender: String,
     recipient: String,
     amount: i8,
 }
 
-#[derive(RustcDecodable, RustcEncodable, Debug, Clone)]
+#[derive(RustcDecodable, RustcEncodable, Debug, Clone, Serialize, Deserialize)]
 struct Block {
     index: i8,
     timestamp: i64,
@@ -128,7 +136,7 @@ impl Blockchain {
 
 //方法
 impl Blockchain {
-    fn init(&mut self) {
+    unsafe fn init(&mut self) {
         self.new_block(100, Some(String::from("1")));
     }
 
@@ -201,11 +209,169 @@ impl Blockchain {
     }
 }
 
+lazy_static! {
+    static ref BC:Blockchain = {
+        let mut bc=Blockchain::new();
+        bc.init();
+        bc
+    };
+}
 
+lazy_static! {
+    static ref NI:String = {
+        let node_identifier = Uuid::new_v4().to_string().replace("-", "");
+        node_identifier
+    };
+}
+
+fn mine(_: &Request) -> Response {
+    let last_block = BC.last_block();
+    let last_proof = last_block.proof;
+    let proof = Blockchain::proof_of_work(last_proof);
+
+    BC.new_transaction("0".to_string(), NI.to_string(), 1);
+
+    let block = BC.new_block(proof, None);
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Res {
+        #[serde(default)]
+        message: String,
+        index: i8,
+        transactions: Vec<Transaction>,
+        proof: i32,
+        previous_hash: String,
+    }
+
+    let response = Res {
+        message: "New Block Forged".to_string(),
+        index: block.index,
+        transactions: block.transaction,
+        proof: block.proof,
+        previous_hash: block.previous_hash,
+    };
+
+    Response::as_json(&response)
+}
+
+fn new_transaction(req: &Request) -> Response {
+    let values = req.get_json().unwrap();
+    let required = vec!["sender", "recipient", "amount"];
+    for k in required {
+        if values[k] == json!(null) {
+            return make_response("Missing values", "text/plain", 400);
+        }
+    };
+
+    let index: i8 = BC.new_transaction(values["sender"].to_string(),
+                                       values["recipient"].to_string(),
+                                       json::decode(&values["amount"].to_string()).unwrap());
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Res {
+        #[serde(default)]
+        message: String,
+    }
+
+    let response = Res {
+        message: "Transacntion will be added to Block ".to_string() + &json::encode(&index).unwrap(),
+    };
+
+    Response::as_json(&response)
+}
+
+fn full_chain(_: &Request) -> Response {
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Res {
+        #[serde(default)]
+        chain: Vec<Block>,
+        length: usize,
+    }
+
+    let response = Res {
+        chain: BC.chain,
+        length: BC.chain.len(),
+    };
+    Response::as_json(&response)
+}
+
+fn register_nodes(req: &Request) -> Response {
+    let values = req.get_json().unwrap();
+    let nodes = values.get("nodes");
+    match nodes {
+        None => {
+            make_response("Error:Please supply a valid list of nodes.",
+                          "text/plain", 400)
+        },
+        Some(v) => {
+            for node in v {
+                BC.register_node(node);
+            }
+            #[derive(Debug, Serialize, Deserialize)]
+            struct Res {
+                #[serde(default)]
+                message: String,
+                total_nodes: Vec<String>,
+            }
+
+            let response = Res {
+                message: "New nodes have been added".to_string(),
+                total_nodes: BC.nodes,
+            };
+            Response::as_json(&response)
+        }
+    }
+}
+
+fn consensus(_: &Request) -> Response {
+    let replaced = BC.resolve_conflicts();
+
+    match replaced {
+        true => {
+            #[derive(Debug, Serialize, Deserialize)]
+            struct Res {
+                #[serde(default)]
+                message: String,
+                new_chain: Vec<Block>,
+            }
+
+            let response = Res {
+                message: "Our chain was replaced".to_string(),
+                new_chain: BC.chain,
+            };
+            Response::as_json(&response)
+        }
+        false => {
+            #[derive(Debug, Serialize, Deserialize)]
+            struct Res {
+                #[serde(default)]
+                message: String,
+                chain: Vec<Block>,
+            }
+
+            let response = Res {
+                message: "Our chain is authoritative".to_string(),
+                chain: BC.chain,
+            };
+            Response::as_json(&response)
+        }
+    }
+}
 
 
 fn main() {
-    let mut blockchian = Blockchain::new();
-    blockchian.init();
-    let node_identifier = Uuid::new_v4().to_string().replace("-", "");
+    let parser = ArgumentParser::new();
+    parser.
+
+    let mut cnt = Canteen::new();
+    cnt.bind(("127.0.0.1", 5000));
+
+    cnt.set_default(utils::err_404);
+    cnt.add_route("/", &[Method::Get], mine)
+        .add_route("/transaction/new", &[Method::Get], new_transaction)
+        .add_route("/chain", &[Method::Get], full_chain)
+        .add_route("/nodes/register", &[Method::Post], register_nodes)
+        .add_route("/nodes/resolve", &[Method::Get], consensus);
+
+    cnt.run();
 }
