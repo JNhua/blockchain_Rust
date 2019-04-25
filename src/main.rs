@@ -23,13 +23,14 @@ use self::crypto::digest::Digest;
 use self::crypto::sha3::Sha3;
 use ::time::get_time;
 use std::rc::Rc;
+use std::cell::RefCell;
 use requests::*;
 use rustc_serialize::json;
 use uuid::Uuid;
 use canteen::utils::make_response;
 use serde_json::json;
 use serde::de::Deserializer;
-use argparse::ArgumentParser;
+use argparse::{ArgumentParser, Store};
 
 #[derive(RustcDecodable, RustcEncodable, Debug, Clone, Serialize, Deserialize)]
 struct Transaction {
@@ -209,13 +210,7 @@ impl Blockchain {
     }
 }
 
-lazy_static! {
-    static ref BC:Blockchain = {
-        let mut bc=Blockchain::new();
-        bc.init();
-        bc
-    };
-}
+static mut BC: Blockchain = Blockchain::new();
 
 lazy_static! {
     static ref NI:String = {
@@ -289,7 +284,7 @@ fn full_chain(_: &Request) -> Response {
     }
 
     let response = Res {
-        chain: BC.chain,
+        chain: BC.chain.clone(),
         length: BC.chain.len(),
     };
     Response::as_json(&response)
@@ -304,8 +299,8 @@ fn register_nodes(req: &Request) -> Response {
                           "text/plain", 400)
         },
         Some(v) => {
-            for node in v {
-                BC.register_node(node);
+            for node in v.as_array().unwrap() {
+                BC.register_node(node.as_str().unwrap().to_string());
             }
             #[derive(Debug, Serialize, Deserialize)]
             struct Res {
@@ -360,11 +355,14 @@ fn consensus(_: &Request) -> Response {
 
 
 fn main() {
-    let parser = ArgumentParser::new();
-    parser.
+    let mut parser = ArgumentParser::new();
+    let mut port = 5000;
+    parser.refer(&mut port).add_option(&["-p", "-port"],
+                                       Store, "port to listen on");
+    parser.parse_args_or_exit();
 
     let mut cnt = Canteen::new();
-    cnt.bind(("127.0.0.1", 5000));
+    cnt.bind(("127.0.0.1", port));
 
     cnt.set_default(utils::err_404);
     cnt.add_route("/", &[Method::Get], mine)
