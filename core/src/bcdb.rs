@@ -1,7 +1,7 @@
 use std::{env, fs};
 use leveldb::database::Database;
 use leveldb::kv::KV;
-use leveldb::options::{Options, WriteOptions, ReadOptions};
+use leveldb::options::{Options, WriteOptions};
 use utils::key;
 
 pub struct BlockChainDb;
