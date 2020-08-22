@@ -36,7 +36,7 @@ impl ProofOfWork {
         }
     }
 
-    fn prepare_data(bc: &mut block::Block, nonce: u32) -> Vec<u8> {
+    pub(crate) fn prepare_data(bc: &mut block::Block, nonce: u32) -> Vec<u8> {
         bc.header.nonce = nonce;
         let data = coder::my_serialize(&(bc.header));
         data

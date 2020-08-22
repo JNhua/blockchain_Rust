@@ -1,17 +1,16 @@
-use core::blockchain;
-use core::transaction;
+use core::{mycore,transaction};
 use std::thread;
 use std::time::Duration;
 use cli::cli::Cli;
 
 fn main() {
-    let mut bc = blockchain::BlockChain::new_blockchain();
+    let mut co = mycore::Core::new();
 
     println!("start mining .... ");
     thread::sleep(Duration::from_secs(2));
     let tx = transaction::Transaction::new([2; 32],
                                            [3; 32], 3, 1, 0, "".to_string());
-    bc.add_block(vec![tx]);
+    co.mining(&mut vec![tx]);
     println!("produce a block !");
 
     println!();
@@ -19,14 +18,10 @@ fn main() {
     thread::sleep(Duration::from_secs(2));
     let tx = transaction::Transaction::new([4; 32],
                                            [5; 32], 5, 1, 0, "".to_string());
-    bc.add_block(vec![tx]);
+    co.mining(& mut vec![tx]);
     println!("produce a block !");
 
-    for b in bc.blocks {
-        println!("++++++++++++++++++++++++++++++++++++++++++++");
-        println!("{:?}", b);
-        println!();
-    }
+    co.print();
 
     Cli::start();
 }

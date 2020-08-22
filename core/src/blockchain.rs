@@ -1,15 +1,21 @@
 use crate::block;
 use crate::bcdb;
 use crate::transaction;
+use crate::pow;
 use leveldb::database::Database;
 use utils::{coder, key};
 use bigint::U256;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 pub struct BlockChain {
-    pub blocks: Vec<block::Block>,
-    curr_bits: u32,
+    // pub blocks: Vec<block::Block>,
+    block_index: Mutex<HashMap<[u8; 32], block::Block>>,
     blocks_db: Box<Database<key::MyKey>>,
-    curr_hash: [u8; 32],
+    pub genesis_hash: [u8; 32],
+    pub curr_hash: [u8; 32],
+    pub curr_bits: u32,
+    pub curr_height: u64,
 }
 
 // const INIT_BITS: u32 = 0x1d00ffff; //Actually should use this value
@@ -29,30 +35,50 @@ impl BlockChain {
         bcdb::BlockChainDb::write_db(database, key, &value);
     }
 
-    pub fn add_block(&mut self, transactions: Vec<transaction::Transaction>) {
-        let pre_block = &self.blocks[self.blocks.len() - 1];
-        let new_block = block::Block::new_block(transactions, pre_block.hash.clone(), self.curr_bits);
+    pub fn input_block(&mut self, block: block::Block) -> Result<(), String>{
+        // //validate the block
+        // if check_block(&block).is_err() {
+        //     return Err("block is invalid".to_string());
+        // }
 
         //write block to db
-        BlockChain::write_block(&mut (self.blocks_db), &new_block);
+        BlockChain::write_block(&mut (self.blocks_db), &block);
 
-        //write tail
-        BlockChain::write_tail(&mut (self.blocks_db), &new_block);
+        if block.header.height > self.curr_height {
+            //write tail
+            BlockChain::write_tail(&mut (self.blocks_db), &block);
+            self.curr_hash = block.hash;
+            self.curr_bits = block.header.bits;
+            self.curr_height = block.header.height;
 
-        self.curr_hash = new_block.hash;
+            //再判断是否需要回朔
+        }
 
-        // push block to blockchain
-        self.blocks.push(new_block);
+        BlockChain::update_map(&mut self.block_index, block.clone());
+
+        //// push block to blockchain
+        // self.blocks.push(block);
+
+        Ok(())
+    }
+
+    fn update_map(map: & mut Mutex<HashMap<[u8; 32], block::Block>>,
+                  block: block::Block) {
+        let mut map = map.lock().unwrap();
+        map.insert(block.hash, block);
     }
 
     fn new_genesis_block() -> block::Block {
-        let tx = transaction::Transaction::new(
-            [0; 32],
-            [0; 32], 0, 0, 0,
-            "".to_string(),
-        );
+        let tx = transaction::Transaction::new([0; 32],
+                                               [0; 32], 0, 0, 0, "This is genesis".to_string());
 
-        block::Block::new_block(vec![tx], [0; 32], INIT_BITS)
+        let mut bc = block::Block::new_block_template(vec![tx], [0; 32], INIT_BITS, 0);
+        let data = pow::ProofOfWork::prepare_data(&mut bc, 0);
+        let mut hash: [u8; 32] = [0; 32];
+        coder::get_hash(&data[..], &mut hash);
+        bc.hash = hash;
+
+        bc
     }
 
     pub fn new_blockchain() -> BlockChain {
@@ -69,11 +95,43 @@ impl BlockChain {
         BlockChain::write_tail(&mut database, &genesis);
 
         let hash = genesis.hash;
+        let mut block_index = Mutex::new(HashMap::new());
+        BlockChain::update_map(&mut block_index, genesis.clone());
+
         BlockChain {
-            blocks: vec![genesis],
+            block_index,
+            genesis_hash: hash,
             curr_bits: INIT_BITS,
             blocks_db: Box::new(database),
             curr_hash: hash,
+            curr_height: 0,
+        }
+    }
+
+    pub fn print(&self) {
+        let mut hash = self.curr_hash;
+        let mut blocks: Vec<block::Block> = Vec::new();
+
+        let map = self.block_index.lock().unwrap();
+        loop {
+            if let Some(b) = map.get(&hash) {
+                hash = b.header.pre_hash;
+                blocks.push(b.clone());
+            } else {
+                panic!("found block error");
+            }
+
+            if hash == self.genesis_hash {
+                break;
+            }
+        }
+
+        blocks.reverse();
+
+        for b in blocks {
+            println!("++++++++++++++++++++++++++++++++++++++++++++");
+            println!("{:?}", b);
+            println!();
         }
     }
 }

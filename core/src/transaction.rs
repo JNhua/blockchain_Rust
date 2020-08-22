@@ -1,7 +1,7 @@
 use utils::coder;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Transaction {
     pub hash: [u8; 32],     
     pub from: [u8; 32],       

@@ -1,10 +1,9 @@
 use chrono::prelude::*;
 use utils::coder;
 use serde::{Deserialize, Serialize};
-use crate::pow;
 use crate::transaction;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct BlockHeader {
     pub time: i64,
     //transactions data merkle root hash
@@ -16,9 +15,10 @@ pub struct BlockHeader {
     pub nonce: u32,
     //after all transaction, the merkle hash of all account state
     pub state_root: [u8; 32],
+    pub height: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Block {
     pub header: BlockHeader,
     pub hash: [u8; 32],
@@ -75,8 +75,10 @@ impl Block {
         merkle_hash
     }
 
-    pub fn new_block_template(transactions: Vec<transaction::Transaction>,
-                              pre_hash: [u8; 32], bits: u32) -> Block {
+    pub fn new_block_template(
+        transactions: Vec<transaction::Transaction>,
+        pre_hash: [u8; 32], bits: u32, height: u64,
+    ) -> Block {
         let tx_hash: [u8; 32] = Block::make_merkle_hash(&transactions);
 
         Block {
@@ -87,21 +89,10 @@ impl Block {
                 bits,
                 nonce: 0,
                 state_root: [0; 32],
+                height,
             },
             hash: [0; 32],
             transactions,
         }
-    }
-
-    pub fn new_block(transactions: Vec<transaction::Transaction>, pre_hash: [u8; 32], bits: u32) -> Block {
-        let mut block = Block::new_block_template(
-            transactions,
-            pre_hash,
-            bits,
-        );
-
-        let pow = pow::ProofOfWork::new_proof_of_work(bits);
-        pow.run(&mut block);
-        block
     }
 }
